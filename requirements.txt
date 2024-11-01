@@ -1,4 +1,4 @@
-homeassistant==2024.10.0
+homeassistant==2024.10.4
 stdlib-list==0.11.0
 tqdm==4.66.0
 black==24.10.0
