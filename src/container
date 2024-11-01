@@ -1,0 +1,251 @@
+#!/bin/bash
+
+mount_points=('/workspace/dist' '/workspace/custom_components' '/workspace/test')
+watch_dirs=('/workspace/dist' '/workspace/custom_components' '/workspace/test/config')
+ha_dirs=('/config/www/workspace' '/config/custom_components' '/config')
+
+function bind_workspace() {
+    if [ "$CODESPACES" == "true" ]; then
+        # When running in a codespace, create symlinks for the workspace mount points.
+        echo "Binding codespace's workspace"
+        local codespace_dirs=(${CODESPACE_PLUGINS:-$(pwd)/dist} ${CODESPACE_INTEGRATIONS:-$(pwd)/custom_components} ${CODESPACE_TEST:-$(pwd)/test})
+        local msgs=(
+            "No local module files bound (${codespace_dirs[0]} does not exist). Specify another plugin folder using the CODESPACE_PLUGINS environment variable."
+            "No local integration files bound (${codespace_dirs[1]} does not exist). Specify another integration folder using the CODESPACE_INTEGRATIONS environment variable."
+            "No local test configuration files bound (${codespace_dirs[2]} does not exist), the default configuration will be used. Specify another test folder using the CODESPACE_TEST environment variable."
+        )
+        for i in "${!mount_points[@]}"; do
+            if [ -d "${codespace_dirs[i]}" ]; then
+                ln -sf "${codespace_dirs[i]}" "${mount_points[i]}"
+            else
+                echo "${msgs[i]}"
+            fi
+        done
+    fi
+}
+
+function load_workspace() {
+    rm -rf /config/www/workspace/*
+    # Copy the local plugins, integrations and test configuration from their respective workspace directories
+    for i in "${!watch_dirs[@]}"; do
+        if [ -d "${watch_dirs[i]}" ]; then
+            cp -r "${watch_dirs[i]}/." "${ha_dirs[i]}"
+        fi
+    done
+}
+
+function watch_workspace() {
+    local events=close_write,moved_to,delete
+    local dirs=()
+    # Watch all existing workspace directories
+    for dir in "${watch_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            dirs+=("$dir")
+        else
+            echo "Workspace directory $dir does not exist and is not watched."
+        fi
+    done
+    if (( ${#dirs[@]} )); then
+        inotifywait -e "$events" -m -r "${dirs[@]}" | python /usr/src/scripts/sync_workspace.py &
+    fi
+}
+
+function ensure_hass_config() {
+    hass --script ensure_config -c /config
+}
+
+function update_config() {
+    # Modify the configuration if necessary (trusted proxies, bypass login)
+    python /usr/src/scripts/update_configuration.py
+}
+
+function create_hass_user() {
+    # Create admin user
+    local username=$HASS_USERNAME
+    local password=$HASS_PASSWORD
+    echo "Creating Home Assistant User ${username}:${password}"
+    hass --script auth -c /config add ${username} ${password}
+    # Add created user to auth configuration, ensuring the bypass login immediately works
+    cat > /config/.storage/auth << EOF
+{
+    "version": 1,
+    "minor_version": 1,
+    "key": "auth",
+    "data": {
+        "users": [
+            {
+                "id": "owner",
+                "group_ids": [],
+                "is_owner": true,
+                "is_active": true,
+                "name": "${username}",
+                "system_generated": false,
+                "local_only": false
+            }
+        ],
+        "groups": [],
+        "credentials": [],
+        "refresh_tokens": []
+    }
+}
+EOF
+}
+
+function bypass_onboarding() {
+    # Setup onboarding file
+    cat > /config/.storage/onboarding << EOF
+{
+    "version": 4,
+    "minor_version": 1,
+    "key": "onboarding",
+    "data": {
+        "done": [
+            "user",
+            "core_config",
+            "analytics",
+            "integration"
+        ]
+    }
+}
+EOF
+    # Setup core configuration (to avoid warning about the country not being set)
+    cat > /config/.storage/core.config << EOF
+{
+    "version": 1,
+    "minor_version": 4,
+    "key": "core.config",
+    "data": {
+        "latitude": 50.83874,
+        "longitude": 4.37477,
+        "elevation": 80,
+        "unit_system_v2": "metric",
+        "location_name": "Home",
+        "time_zone": "Europe/Brussels",
+        "external_url": null,
+        "internal_url": null,
+        "currency": "EUR",
+        "country": "BE",
+        "language": "en",
+        "radius": 100
+    }
+}
+EOF
+}
+
+function fetch_lovelace_plugins() {
+    # Download the requested lovelace plugins from github
+    IFS=';' read -ra PLUGINS_ARRAY <<< "$LOVELACE_PLUGINS"
+    for plugin in "${PLUGINS_ARRAY[@]}"; do
+        local author=$(cut -d '/' -f1 <<<"$plugin")
+        local repo=$(cut -d '/' -f2 <<<"$plugin")
+        local prefix=$(cut -d '-' -f1 <<<"$repo")
+        local file=$repo
+        local filealt=
+
+        if [[ $prefix == "lovelace" ]]; then
+            filealt=$(cut -c 10- <<<"$repo")
+        elif [[ $prefix == "ha" ]]; then
+            filealt=$(cut -c 4- <<<"$repo")
+        fi
+
+        local out="/config/www/github/${file}.js"
+        local opts=('--output' $out '--fail' '--silent')
+        echo "Downloading ${plugin} to ${file}.js"
+        curl https://raw.githubusercontent.com/${author}/${repo}/master/dist/${file}.js "${opts[@]}" \
+        || curl https://raw.githubusercontent.com/${author}/${repo}/master/${file}.js "${opts[@]}" \
+        || curl -L https://github.com/${author}/${repo}/releases/latest/download/${file}.js "${opts[@]}" \
+        || curl -L https://github.com/${author}/${repo}/releases/latest/download/${file}-bundle.js "${opts[@]}"
+        if [[ -n "$filealt" ]] && [[ ! -f "$out" ]]; then
+            curl https://raw.githubusercontent.com/${author}/${repo}/master/dist/${filealt}.js "${opts[@]}" \
+            || curl https://raw.githubusercontent.com/${author}/${repo}/master/${filealt}.js "${opts[@]}" \
+            || curl -L https://github.com/${author}/${repo}/releases/latest/download/${filealt}.js "${opts[@]}" \
+            || curl -L https://github.com/${author}/${repo}/releases/latest/download/${filealt}-bundle.js "${opts[@]}"
+        fi
+        if [[ ! -f "$out" ]]; then
+            echo "Failed to download plugin ${plugin}"
+        fi
+    done
+}
+
+function install_lovelace_plugins() {
+    mkdir -p /config/www/workspace
+    mkdir -p /config/www/github
+    fetch_lovelace_plugins
+    python /usr/src/scripts/install_plugins.py
+}
+
+function install_hacs() {
+    if [ "$INSTALL_HACS" == "true" ]; then
+        echo -n $(hass --version) > /config/.HA_VERSION
+        curl -sfSL https://get.hacs.xyz | bash -
+    fi
+}
+
+function setup() {
+    bind_workspace
+    load_workspace
+    ensure_hass_config
+    update_config
+    create_hass_user
+    bypass_onboarding
+    install_hacs
+    install_lovelace_plugins
+}
+
+function get_dev() {
+    # Fetch latest development version of home assistant core
+    rm -rf /usr/src/homeassistant
+    git clone --branch dev --single-branch --depth 1 https://github.com/home-assistant/core.git /usr/src/homeassistant
+    uv pip install --upgrade -e /usr/src/homeassistant
+}
+
+function run() {
+    # Reload the workspace and update the configuration before running hass
+    watch_workspace
+    while true; do
+        load_workspace
+        update_config
+        hass -c /config -v &
+        wait $!  # Catch ctrl + C
+        [ "$HASS_AUTO_RESTART" == "true" ] || break
+    done
+}
+
+# Source the provided environment file
+if [[ -f "$ENV_FILE" ]]; then
+    set -o allexport
+    source "$ENV_FILE"
+    set +o allexport
+fi
+
+# Set undefined environment variables to their defaults
+export HASS_USERNAME=${HASS_USERNAME:-dev}
+export HASS_PASSWORD=${HASS_PASSWORD:-dev}
+export HASS_BYPASS_LOGIN=${HASS_BYPASS_LOGIN:-false}
+export HASS_AUTO_RESTART=${HASS_AUTO_RESTART:-true}
+export INSTALL_HACS=${INSTALL_HACS:-false}
+
+# Activate the virtual environment
+source $VIRTUAL_ENV/bin/activate
+
+case $1 in
+    setup-dev)
+        get_dev
+        setup
+        ;;
+    setup)
+        setup
+        ;;
+    launch)
+        run
+        ;;
+    run-dev)
+        get_dev
+        setup
+        run
+        ;;
+    *)
+        setup
+        run
+        ;;
+esac

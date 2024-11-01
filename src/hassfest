@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Activate the virtual environment
+source $VIRTUAL_ENV/bin/activate
+
 cd /usr/src/homeassistant
 for integration in `find /config/custom_components -mindepth 1 -maxdepth 1 -type d`
 do
