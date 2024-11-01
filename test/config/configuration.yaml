@@ -1,0 +1,16 @@
+default_config:
+
+lovelace:
+  mode: storage
+  dashboards:
+    dashboard-plugins:
+      mode: yaml
+      title: Plugins
+      icon: mdi:puzzle
+      show_in_sidebar: true
+      filename: dashboards/plugins.yaml
+
+template:
+  sensor:
+    - name: hello
+      state: Hello World!

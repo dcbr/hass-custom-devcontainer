@@ -2,37 +2,121 @@
 
 plugins=
 
+function bind_workspace() {
+    if [ "$CODESPACES" == "true" ]; then
+        # When running in a codespace, create symlinks for the `/workspace/dist` and `/workspace/test` mount points.
+        echo "Binding codespace's workspace"
+        dist=${CODESPACE_DIST:-$(pwd)/dist}
+        test=${CODESPACE_TEST:-$(pwd)/test}
+        if [ -d "$dist" ]; then
+            ln -sf "$dist" /workspace/dist
+        else
+            echo "No local module files bound ($dist does not exist). Specify another distribution folder using the CODESPACE_DIST environment variable."
+        fi
+        if [ -d "$test" ]; then
+            ln -sf "$test" /workspace/test
+        else
+            echo "No local test configuration files bound ($test does not exist), the default configuration will be used. Specify another test folder using the CODESPACE_TEST environment variable."
+        fi
+    fi
+    # Create symlink from `/config/www/workspace` to `/workspace/dist`
+    mkdir -p /config/www
+    ln -sf /workspace/dist /config/www/workspace
+}
+
+function load_test_config() {
+    # Copy the configuration from the test mount point
+    if [ -d "/workspace/test/config" ]; then
+        cp -r /workspace/test/config/. /config
+    fi
+}
+
 function ensure_hass_config() {
     hass --script ensure_config -c /config
 }
 
+function update_config() {
+    # Modify the configuration if necessary (trusted proxies, bypass login)
+    python /usr/src/scripts/update_configuration.py
+}
+
 function create_hass_user() {
+    # Create admin user
     local username=${HASS_USERNAME:-dev}
     local password=${HASS_PASSWORD:-dev}
     echo "Creating Home Assistant User ${username}:${password}"
     hass --script auth -c /config add ${username} ${password}
+    # Add created user to auth configuration, ensuring the bypass login immediately works
+    cat > /config/.storage/auth << EOF
+{
+    "version": 1,
+    "minor_version": 1,
+    "key": "auth",
+    "data": {
+        "users": [
+            {
+                "id": "owner",
+                "group_ids": [],
+                "is_owner": true,
+                "is_active": true,
+                "name": "${username}",
+                "system_generated": false,
+                "local_only": false
+            }
+        ],
+        "groups": [],
+        "credentials": [],
+        "refresh_tokens": []
+    }
+}
+EOF
 }
 
 function bypass_onboarding() {
+    # Setup onboarding file
     cat > /config/.storage/onboarding << EOF
 {
+    "version": 4,
+    "minor_version": 1,
+    "key": "onboarding",
     "data": {
         "done": [
             "user",
             "core_config",
+            "analytics",
             "integration"
         ]
-    },
-    "key": "onboarding",
-    "version": 3
+    }
+}
+EOF
+    # Setup core configuration (to avoid warning about the country not being set)
+    cat > /config/.storage/core.config << EOF
+{
+    "version": 1,
+    "minor_version": 4,
+    "key": "core.config",
+    "data": {
+        "latitude": 50.83874,
+        "longitude": 4.37477,
+        "elevation": 80,
+        "unit_system_v2": "metric",
+        "location_name": "Home",
+        "time_zone": "Europe/Brussels",
+        "external_url": null,
+        "internal_url": null,
+        "currency": "EUR",
+        "country": "BE",
+        "language": "en",
+        "radius": 100
+    }
 }
 EOF
 }
 
 function fetch_lovelace_plugins() {
-    mkdir -p /config/www/workspace
-    for plugin in $LOVELACE_PLUGINS
-    do
+    # Download the requested lovelace plugins from github
+    IFS=';' read -ra PLUGINS_ARRAY <<< "$LOVELACE_PLUGINS"
+    for plugin in "${PLUGINS_ARRAY[@]}"; do
         local author=$(cut -d '/' -f1 <<<"$plugin")
         local repo=$(cut -d '/' -f2 <<<"$plugin")
         local prefix=$(cut -d '-' -f1 <<<"$repo")
@@ -45,63 +129,33 @@ function fetch_lovelace_plugins() {
         fi
 
         echo "Downloading ${plugin} to ${file}.js"
-        curl https://raw.githubusercontent.com/${author}/${repo}/master/dist/${file}.js --output /config/www/${file}.js --fail \
-        || curl https://raw.githubusercontent.com/${author}/${repo}/master/${file}.js --output /config/www/${file}.js --fail \
-        || curl -L https://github.com/${author}/${repo}/releases/latest/download/${file}.js --output /config/www/${file}.js --fail \
-        || curl -L https://github.com/${author}/${repo}/releases/latest/download/${file}-bundle.js --output /config/www/${file}.js --fail
-        plugins="${plugins} /local/${file}.js"
+        curl https://raw.githubusercontent.com/${author}/${repo}/master/dist/${file}.js --output /config/www/${file}.js --fail --silent \
+        || curl https://raw.githubusercontent.com/${author}/${repo}/master/${file}.js --output /config/www/${file}.js --fail --silent \
+        || curl -L https://github.com/${author}/${repo}/releases/latest/download/${file}.js --output /config/www/${file}.js --fail --silent \
+        || curl -L https://github.com/${author}/${repo}/releases/latest/download/${file}-bundle.js --output /config/www/${file}.js --fail --silent --show-error
+        if [ -f "/config/www/${file}.js" ]; then
+            plugins="${plugins};/config/www/${file}.js"
+        fi
     done
 }
 
 function install_lovelace_plugins() {
-
-    for file in $LOVELACE_LOCAL_FILES
-    do
-        plugins="${plugins} /local/workspace/${file}"
-    done
-
     fetch_lovelace_plugins
-
-    cat > /config/.storage/lovelace_resources << EOF
-{
-    "data": {
-        "items": [
-EOF
-
-    local i="0"
-    for plugin in $plugins
-    do
-        if [ $i -gt "0" ]; then
-            echo "," >> /config/.storage/lovelace_resources
-        fi
-
-        i=$((i+1))
-
-        head -c -1 >> /config/.storage/lovelace_resources << EOF
-            {
-                "id": "${i}",
-                "type": "module",
-                "url": "${plugin}"
-            }
-EOF
-    done
-
-    cat >> /config/.storage/lovelace_resources << EOF
-
-        ]
-    },
-    "key": "lovelace_resources",
-    "version": 1
-}
-EOF
+    python /usr/src/scripts/install_plugins.py $plugins
 }
 
 function install_hacs() {
-    curl -sfSL https://hacs.xyz/install | bash -
+    if [ "$INSTALL_HACS" == "true" ]; then
+        echo -n $(hass --version) > /config/.HA_VERSION
+        curl -sfSL https://get.hacs.xyz | bash -
+    fi
 }
 
 function setup() {
+    bind_workspace
+    load_test_config
     ensure_hass_config
+    update_config
     create_hass_user
     bypass_onboarding
     install_hacs
@@ -109,18 +163,28 @@ function setup() {
 }
 
 function get_dev() {
+    # Fetch latest development version of home assistant core
     rm -rf /usr/src/homeassistant
     git clone --branch dev --single-branch --depth 1 https://github.com/home-assistant/core.git /usr/src/homeassistant
-    pip install --upgrade -e /usr/src/homeassistant
+    uv pip install --upgrade -e /usr/src/homeassistant
 }
 
 function run() {
+    # Reload and update the configuration before running hass
+    load_test_config
+    update_config
     hass -c /config -v
 }
 
+# Source the provided environment file
 if [[ -f "$ENV_FILE" ]]; then
+    set -o allexport
     source "$ENV_FILE"
+    set +o allexport
 fi
+
+# Activate the virtual environment
+source $VIRTUAL_ENV/bin/activate
 
 case $1 in
     setup-dev)

@@ -6,13 +6,19 @@
         {
             "label": "Build",
             "type": "shell",
-            "command": "docker build . -t thomasloven/hass-custom-devcontainer --force-rm",
+            "command": "docker build . -t dcbr/hass-custom-devcontainer --force-rm",
             "problemMatcher": []
         },
         {
             "label": "Test",
             "type": "shell",
             "command": "./test.sh",
+            "problemMatcher": []
+        },
+        {
+            "label": "Test Attach",
+            "type": "shell",
+            "command": "docker exec -it test sudo -E bash",
             "problemMatcher": []
         }
     ]
