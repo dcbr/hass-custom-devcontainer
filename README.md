@@ -9,7 +9,7 @@ docker run --rm -it \
     -v $(pwd):/config/www/workspace \
     -e LOVELACE_LOCAL_FILES="myplugin.js"
     -e LOVELACE_PLUGINS="thomasloven/lovelace-card-mod thomasloven/lovelace-auto-entities custom-cards/button-card" \
-    thomasloven/hass-custom-devcontainer
+    dcbr/hass-custom-devcontainer
 ```
 
 The default action of the image is to run `container`, which will
@@ -59,7 +59,7 @@ Launch Home Assistant with `hass -c /config -v`
 
 ```json
 {
-  "image": "thomasloven/hass-custom-devcontainer",
+  "image": "dcbr/hass-custom-devcontainer",
   "postCreateCommand": "container setup && npm add",
   "forwardPorts": [8123],
   "mounts": [

@@ -40,8 +40,8 @@ VOLUME /config
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
-COPY container /usr/bin
-COPY hassfest /usr/bin
+COPY src/container /usr/bin
+COPY src/hassfest /usr/bin
 
 USER vscode
 
