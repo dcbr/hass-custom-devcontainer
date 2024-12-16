@@ -6,7 +6,7 @@
         {
             "label": "Build",
             "type": "shell",
-            "command": "docker build . -t thomasloven/hass-custom-devcontainer --force-rm",
+            "command": "docker build . -t dcbr/hass-custom-devcontainer --force-rm",
             "problemMatcher": []
         },
         {
