@@ -12,8 +12,32 @@
         {
             "label": "Test",
             "type": "shell",
-            "command": "./test.sh",
+            "command": "./test.sh ${input:mode}",
             "problemMatcher": []
+        },
+        {
+            "label": "Test Attach",
+            "type": "shell",
+            "command": "docker exec -it test sudo -E bash",
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "mode",
+            "type":"pickString",
+            "description": "Mode:",
+            "default": "",
+            "options": [
+                {
+                    "label": "Default",
+                    "value": ""
+                },
+                {
+                    "label": "Dev",
+                    "value": "dev"
+                }
+            ]
         }
     ]
 }

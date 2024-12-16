@@ -1,0 +1,12 @@
+views:
+  - title: Home
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Custom button and card
+            heading_style: title
+          - type: custom:button-card
+            entity: sensor.hello
+            color: orange
+          - type: custom:hello-world-card
