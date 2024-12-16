@@ -19,3 +19,10 @@ jobs:
         context: .
         push: true
         tags: dcbr/hass-custom-devcontainer:latest
+    - name: Docker Hub Description
+      uses: peter-evans/dockerhub-description@v4
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        repository: dcbr/hass-custom-devcontainer
+        short-description: ${{ github.event.repository.description }}

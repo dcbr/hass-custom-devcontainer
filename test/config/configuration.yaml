@@ -1,0 +1,20 @@
+default_config:
+
+# Needed for now to prevent setup errors
+go2rtc:
+  url: http://0.0.0.0
+
+lovelace:
+  mode: storage
+  dashboards:
+    dashboard-plugins:
+      mode: yaml
+      title: Plugins
+      icon: mdi:puzzle
+      show_in_sidebar: true
+      filename: dashboards/plugins.yaml
+
+template:
+  sensor:
+    - name: hello
+      state: Hello World!
