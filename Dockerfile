@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/python:3.13
+FROM mcr.microsoft.com/devcontainers/python:1-3.13
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -8,30 +8,32 @@ RUN \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         bluez \
+        libffi-dev \
+        libssl-dev \
+        libjpeg-dev \
+        zlib1g-dev \
+        autoconf \
+        build-essential \
+        libopenjp2-7 \
+        libtiff6 \
+        libturbojpeg0-dev \
+        tzdata \
         ffmpeg \
-        libudev-dev \
-        libavformat-dev \
-        libavcodec-dev \
-        libavdevice-dev \
-        libavutil-dev \
-        libgammu-dev \
-        libswscale-dev \
-        libswresample-dev \
-        libavfilter-dev \
-        libpcap-dev \
-        libturbojpeg0 \
-        libyaml-dev \
-        libxml2 \
+        liblapack3 \
+        liblapack-dev \
+        libatlas-base-dev \
+        \
         git \
-        cmake \
-        inotify-tools \
+        libpcap-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node
 RUN \
     source /usr/local/share/nvm/nvm.sh \
-    && nvm install 22
+    && nvm install lts/iron
+
+COPY --from=ghcr.io/alexxit/go2rtc:latest /usr/local/bin/go2rtc /bin/go2rtc
 
 EXPOSE 8123
 

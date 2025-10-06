@@ -1,9 +1,5 @@
 default_config:
 
-# Needed for now to prevent setup errors
-go2rtc:
-  url: http://0.0.0.0
-
 lovelace:
   mode: storage
   dashboards:
