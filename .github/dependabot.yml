@@ -5,5 +5,5 @@ updates:
     schedule:
       interval: "weekly"
     ignore:
-      - dependency-name: "home-assistant"
+      - dependency-name: "homeassistant"
         update-types: ["version-update:semver-patch"]
